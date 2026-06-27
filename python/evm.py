@@ -14,6 +14,7 @@ import json
 import os
 
 from eth_hash.auto import keccak
+INT_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
 def evm(code, tranx, sts):
     pc = 0
@@ -43,27 +44,29 @@ def evm(code, tranx, sts):
             b = stack.pop()
             c = a+b
             
-            if c > 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff :
-                d = c % 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff 
-                stack.insert(0,d - 1)
+            if c > INT_MAX :
+                d = c % INT_MAX 
+                stack.insert(0,d - 1) #after overflow the count starts from 0
             else:
                 stack.insert(0,c)
         
+        #MUL
         if op == 0x02:
             a = stack.pop()
             b = stack.pop()
 
             c = a*b
-            if c > 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff:
-                d = c % (0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)
+            if c > INT_MAX:
+                d = c % (INT_MAX)
 
                 if d == 0:
-                    stack.insert(0,0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff -1)
+                    stack.insert(0,INT_MAX -1)
                 else:
                     stack.insert(0,d-1)
             else:
                 stack.insert(0,c)
             
+        #SUB
         if op == 0x03:
             a = stack.pop()
             b = stack.pop()
@@ -71,9 +74,10 @@ def evm(code, tranx, sts):
             c = b-a
 
             if c < 0:
-                stack.insert(0,c + 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff +1)
+                stack.insert(0,c + INT_MAX +1)
             else: stack.insert(0,c)
 
+        #DIV
         if op == 0x04:
             a = stack.pop()
             b = stack.pop()
@@ -84,6 +88,7 @@ def evm(code, tranx, sts):
                 c = b/a
                 stack.insert(0, int(c))            
 
+        #MOD
         if op == 0x06:
             a = stack.pop()
             b = stack.pop()
@@ -94,6 +99,7 @@ def evm(code, tranx, sts):
                 c = b%a
                 stack.insert(0,c)
 
+        #ADDMOD: a+b mod c stack: [c,b,a]
         if op == 0x08:
             a = stack.pop()
             b = stack.pop()
@@ -105,6 +111,7 @@ def evm(code, tranx, sts):
                 d = (c+b)%a
                 stack.insert(0,d)
 
+        #MULMOD: a*b mod c stack: [c,b,a]
         if op == 0x09:
             a = stack.pop()
             b = stack.pop()
@@ -116,12 +123,14 @@ def evm(code, tranx, sts):
                 d = (b*c)%a
                 stack.insert(0,d)
 
+        #EXP
         if op == 0x0a:
             a = stack.pop()
             b = stack.pop()
 
             stack.insert(0,(b**a))
 
+        #SIGNEXTEND
         if op == 0x0b:
             val = stack.pop()
             n = stack.pop()
@@ -133,9 +142,8 @@ def evm(code, tranx, sts):
             if sign_bit == 0:
                 extended = val
             else:
-                MAX_256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
                 mask = (1 << (bit_index + 1)) - 1
-                extended = val | (MAX_256 & ~mask)  
+                extended = val | (INT_MAX & ~mask)  
                 
             stack.insert(0, extended)
 
@@ -648,86 +656,17 @@ def evm(code, tranx, sts):
             size = stack.pop()
             offset = stack.pop()
 
-            stack.insert(0,hex(int.from_bytes(memo[offset:offset+size])))
+            return (True,hex(int.from_bytes(memo[offset:offset+size]))[2:])
+        
+        if op == 0xFD:
+            size = stack.pop()
+            offset = stack.pop()
+
+            return (False, hex(int.from_bytes(memo[offset:offset+size]))[2:])
 
 
     return (success, stack)
 
-# def test():
-#     script_dirname = os.path.dirname(os.path.abspath(__file__))
-#     json_file = os.path.join(script_dirname, "..", "evm.json")
-#     with open(json_file) as f:
-#         data = json.load(f)
-#         total = len(data)
-
-#         for i, test in enumerate(data):
-#             # Note: as the test cases get more complex, you'll need to modify this
-#             # to pass down more arguments to the evm function
-#             if 101>i>96 or 111<i<116 or 116<i<119 or 131<i<137 :
-#                 tx = test['tx']
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, tx,{})
-#             elif 109>i>100:
-#                 tx = test['block']
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, tx,{})
-#             elif i == 110  or  123<i < 127 : # or i == 139
-#                 tx = test['state']
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, tx,{})
-#             elif i == 128:
-#                 sts = test['state']
-#                 tx = test['tx']
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, tx, sts)
-#             else:
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, {},{})
-
-#             expect = test.get('expect', {})
-
-#             # Stack-based test
-#             if 'stack' in expect:
-#                 expected_stack = [int(x, 16) for x in expect['stack']]
-#                 if stack != expected_stack or success != expect['success']:
-#                     print(f"❌ Test #{i + 1}/{total} {test['name']}")
-#                     if stack != expected_stack:
-#                         print("Stack doesn't match")
-#                         print(" expected:", expected_stack)
-#                         print("   actual:", stack)
-#                     else:
-#                         print("Success doesn't match")
-#                         print(" expected:", expect['success'])
-#                         print("   actual:", success)
-#                     print("\nTest code:")
-#                     print(test['code']['asm'])
-#                     print("Hint:", test['hint'])
-#                     print(f"Progress: {i}/{len(data)}")
-#                     break
-
-#             # Logs-based test
-#             elif 'logs' in expect:
-#                 expected_logs = expect['logs']
-#                 if stack != expected_logs or success != expect['success']:
-#                     print(f"❌ Test #{i + 1}/{total} {test['name']}")
-#                     if stack != expected_logs:
-#                         print("Logs don't match")
-#                         print(" expected:", expected_logs)
-#                         print("   actual:", stack)
-#                     else:
-#                         print("Success doesn't match")
-#                         print(" expected:", expect['success'])
-#                         print("   actual:", success)
-#                     print("\nTest code:")
-#                     print(test['code']['asm'])
-#                     print("Hint:", test['hint'])
-#                     print(f"Progress: {i}/{len(data)}")
-#                     break
-#             else:
-#                 print(f"✓  Test #{i + 1}/{total} {test['name']}")       
-
-# if __name__ == '__main__':
-#     test()
 
 def test():
     script_dirname = os.path.dirname(os.path.abspath(__file__))
