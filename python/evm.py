@@ -16,7 +16,7 @@ import os
 from eth_hash.auto import keccak
 INT_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
-def evm(code, tranx, sts):
+def evm(code, tranx, sts, addr=None):
     pc = 0
     success = True
     stack = []
@@ -24,6 +24,8 @@ def evm(code, tranx, sts):
     tx = tranx
     state = sts
     storage = {}
+    size = 0
+    memory_call = bytearray()
 
     while pc < len(code):
         op = code[pc]
@@ -62,7 +64,7 @@ def evm(code, tranx, sts):
                 if d == 0:
                     stack.insert(0,INT_MAX -1)
                 else:
-                    stack.insert(0,d-1)
+                     stack.insert(0,d-1)
             else:
                 stack.insert(0,c)
             
@@ -656,17 +658,126 @@ def evm(code, tranx, sts):
             size = stack.pop()
             offset = stack.pop()
 
-            return (True,hex(int.from_bytes(memo[offset:offset+size]))[2:])
+            return (True,memo[offset:offset+size].hex())
         
         if op == 0xFD:
             size = stack.pop()
             offset = stack.pop()
 
-            return (False, hex(int.from_bytes(memo[offset:offset+size]))[2:])
+            return (False, memo[offset:offset+size].hex())
+
+        if op == 0xF1:
+            retLength  = stack.pop()
+            retOffset = stack.pop()
+            argsLength = stack.pop()
+            argsOffset = stack.pop()
+            val = stack.pop()
+            adr = stack.pop()
+            gas = stack.pop()
+
+            (suc, result) = evm(bytes.fromhex(state[f"0x{adr:040x}"]['code']['bin']), tx or {}, state or {}, adr)
+            memo.extend([0] * (retOffset + retLength))
+            if(result != []):
+                memo[retOffset:retOffset+retLength] = bytes.fromhex(result)
+                memory_call.extend([0] * (len(result)))
+                memory_call[0:len(result)] = bytes.fromhex(result)
+            
+
+            size = retLength
+            if suc:
+                stack.insert(0,1)
+            else:
+                stack.insert(0,0)
+            
+        if op == 0x3d: 
+            stack.insert(0, size)
+        
+        if op == 0x3e:
+            size = stack.pop()
+            offset = stack.pop()
+            desoffset = stack.pop()
+
+            memo.extend([0] * (desoffset + size))
+            memo[desoffset:desoffset+size] = memory_call[offset:offset+size]
 
 
     return (success, stack)
 
+# def test():
+#     script_dirname = os.path.dirname(os.path.abspath(__file__))
+#     json_file = os.path.join(script_dirname, "..", "evm.json")
+#     with open(json_file) as f:
+#         data = json.load(f)
+#         total = len(data)
+
+#         for i, test in enumerate(data):
+#             # Note: as the test cases get more complex, you'll need to modify this
+#             # to pass down more arguments to the evm function
+#             if 101>i>96 or 111<i<116 or 116<i<119 or 131<i<137 :
+#                 tx = test['tx']
+#                 code = bytes.fromhex(test['code']['bin'])
+#                 (success, stack) = evm(code, tx,{})
+#             elif 109>i>100:
+#                 tx = test['block']
+#                 code = bytes.fromhex(test['code']['bin'])
+#                 (success, stack) = evm(code, tx,{})
+#             elif i == 110  or  123<i < 127 : # or i == 139
+#                 tx = test['state']
+#                 code = bytes.fromhex(test['code']['bin'])
+#                 (success, stack) = evm(code, tx,{})
+#             elif i == 128:
+#                 sts = test['state']
+#                 tx = test['tx']
+#                 code = bytes.fromhex(test['code']['bin'])
+#                 (success, stack) = evm(code, tx, sts)
+#             else:
+#                 code = bytes.fromhex(test['code']['bin'])
+#                 (success, stack) = evm(code, {},{})
+
+#             expect = test.get('expect', {})
+
+#             # Stack-based test
+#             if 'stack' in expect:
+#                 expected_stack = [int(x, 16) for x in expect['stack']]
+#                 if stack != expected_stack or success != expect['success']:
+#                     print(f"❌ Test #{i + 1}/{total} {test['name']}")
+#                     if stack != expected_stack:
+#                         print("Stack doesn't match")
+#                         print(" expected:", expected_stack)
+#                         print("   actual:", stack)
+#                     else:
+#                         print("Success doesn't match")
+#                         print(" expected:", expect['success'])
+#                         print("   actual:", success)
+#                     print("\nTest code:")
+#                     print(test['code']['asm'])
+#                     print("Hint:", test['hint'])
+#                     print(f"Progress: {i}/{len(data)}")
+#                     break
+
+#             # Logs-based test
+#             elif 'logs' in expect:
+#                 expected_logs = expect['logs']
+#                 if stack != expected_logs or success != expect['success']:
+#                     print(f"❌ Test #{i + 1}/{total} {test['name']}")
+#                     if stack != expected_logs:
+#                         print("Logs don't match")
+#                         print(" expected:", expected_logs)
+#                         print("   actual:", stack)
+#                     else:
+#                         print("Success doesn't match")
+#                         print(" expected:", expect['success'])
+#                         print("   actual:", success)
+#                     print("\nTest code:")
+#                     print(test['code']['asm'])
+#                     print("Hint:", test['hint'])
+#                     print(f"Progress: {i}/{len(data)}")
+#                     break
+#             else:
+#                 print(f"✓  Test #{i + 1}/{total} {test['name']}")       
+
+# if __name__ == '__main__':
+#     test()
 
 def test():
     script_dirname = os.path.dirname(os.path.abspath(__file__))
