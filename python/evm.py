@@ -15,15 +15,15 @@ import os
 
 from eth_hash.auto import keccak
 INT_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+storage = {}
 
-def evm(code, tranx, sts, addr=None):
+def evm(code, tranx, sts, addr):
     pc = 0
     success = True
     stack = []
     memo = bytearray()
     tx = tranx
     state = sts
-    storage = {}
     size = 0
     memory_call = bytearray()
 
@@ -37,6 +37,7 @@ def evm(code, tranx, sts, addr=None):
 
         if op == 0x50:
             stack.pop(0)
+            size += 1
 
         if op == 0x00:
             break
@@ -399,8 +400,8 @@ def evm(code, tranx, sts, addr=None):
                 pc = des
         
         if op == 0x52:
-            val = stack.pop()
-            offset = stack.pop()
+            offset = stack.pop(0)
+            val = stack.pop(0)
 
             byt = val.to_bytes(32,'big')
 
@@ -411,7 +412,7 @@ def evm(code, tranx, sts, addr=None):
                 memo[offset+i] = byt[i]
 
         if op == 0x51:
-            offset = stack.pop()
+            offset = stack.pop(0)
 
             if offset + 32 > len(memo):
                 memo.extend([0] * (offset + 32 - len(memo)))
@@ -458,7 +459,7 @@ def evm(code, tranx, sts, addr=None):
             stack.insert(0, to_addr)
 
         if op == 0x33:
-            from_addr = tx["from"]
+            from_addr = tx.get("to") or tx.get("from")
             stack.insert(0, int(from_addr,16))
 
         if op == 0x32:
@@ -498,11 +499,11 @@ def evm(code, tranx, sts, addr=None):
             stack.insert(0,int(chainid,16))
         
         if op == 0x31:
-            addr_raw = stack.pop()
+            addr_raw = stack.pop(0)
             addr = hex(addr_raw)[2:].rjust(40,"0")
             addr_final = "0x" + addr.lower()
 
-            balance_raw = tx.get(addr_final,{}).get("balance", "0x0")
+            balance_raw = state.get(addr_final,{}).get("balance", "0x0")
             balance = int(balance_raw,16)
 
             stack.insert(0,balance)
@@ -558,13 +559,13 @@ def evm(code, tranx, sts, addr=None):
 
 
         if op == 0x3B:  
-            addr = stack.pop()
+            addr = stack.pop(0)
         
             addr_hex = hex(addr)[2:].rjust(40, '0')
             addr_str = "0x" + addr_hex.lower()
 
 
-            code_hex = tx.get(addr_str, {}).get("code", {}).get("bin", "")
+            code_hex = state.get(addr_str, {}).get("code", {}).get("bin", "")
 
             code_bytes = bytes.fromhex(code_hex)
             stack.insert(0, len(code_bytes))
@@ -578,7 +579,7 @@ def evm(code, tranx, sts, addr=None):
             addr_hex = hex(addr)[2:].rjust(40, '0')
             addr_str = "0x" + addr_hex.lower()
 
-            code_hex = tx.get(addr_str, {}).get("code",{}).get("bin","")
+            code_hex = state.get(addr_str, {}).get("code",{}).get("bin","")
 
             code_bytes = bytes.fromhex(code_hex)
 
@@ -593,7 +594,7 @@ def evm(code, tranx, sts, addr=None):
             addr_hex = hex(addr)[2:].rjust(40, '0')
             addr_str = "0x" + addr_hex.lower()
 
-            code_raw = tx.get(addr_str,{}).get("code",{}).get("bin","")
+            code_raw = state.get(addr_str,{}).get("code",{}).get("bin","")
             
             if code_raw:
                 
@@ -625,7 +626,7 @@ def evm(code, tranx, sts, addr=None):
             storage[slot] = value
 
         if op == 0x54:
-            slot = stack.pop()
+            slot = stack.pop(0)
 
             stack.insert(0,storage.get(slot, 0))
         
@@ -700,84 +701,50 @@ def evm(code, tranx, sts, addr=None):
             memo.extend([0] * (desoffset + size))
             memo[desoffset:desoffset+size] = memory_call[offset:offset+size]
 
+        if op == 0xf4:
+            retLength  = stack.pop()
+            retOffset = stack.pop()
+            argsLength = stack.pop()
+            argsOffset = stack.pop()
+            addr = stack.pop()
+            gas = stack.pop()
+
+            (suc, result) = evm(bytes.fromhex(state[f"0x{addr:040x}"]['code']['bin']), tx or {}, {}, addr)
+
+            if suc == True:
+                stack.insert(0,1)
+            else:
+                stack.insert(0,0)
+        
+        if op == 0xfa:
+            retLength  = stack.pop()
+            retOffset = stack.pop()
+            argsLength = stack.pop()
+            argsOffset = stack.pop()
+            addr = stack.pop()
+            gas = stack.pop()
+            s_before = storage.copy() #creates a shallow copy as we are working with int,int format
+            
+            (suc, result) = evm(bytes.fromhex(state[f"0x{addr:040x}"]['code']['bin']), tx or {}, {}, addr)
+            
+            if s_before != storage:
+                suc = False
+            else:
+                memo.extend([0] * (retOffset + retLength))
+                memo[retOffset:retOffset+retLength] = bytes.fromhex(result)
+                
+                memory_call.extend([0] * (len(result)))
+                memory_call[0:len(result)] = bytes.fromhex(result)
+
+                size = retLength
+            
+            if suc:
+                stack.insert(0,1)
+            else:
+                stack.insert(0,0)
+
 
     return (success, stack)
-
-# def test():
-#     script_dirname = os.path.dirname(os.path.abspath(__file__))
-#     json_file = os.path.join(script_dirname, "..", "evm.json")
-#     with open(json_file) as f:
-#         data = json.load(f)
-#         total = len(data)
-
-#         for i, test in enumerate(data):
-#             # Note: as the test cases get more complex, you'll need to modify this
-#             # to pass down more arguments to the evm function
-#             if 101>i>96 or 111<i<116 or 116<i<119 or 131<i<137 :
-#                 tx = test['tx']
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, tx,{})
-#             elif 109>i>100:
-#                 tx = test['block']
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, tx,{})
-#             elif i == 110  or  123<i < 127 : # or i == 139
-#                 tx = test['state']
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, tx,{})
-#             elif i == 128:
-#                 sts = test['state']
-#                 tx = test['tx']
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, tx, sts)
-#             else:
-#                 code = bytes.fromhex(test['code']['bin'])
-#                 (success, stack) = evm(code, {},{})
-
-#             expect = test.get('expect', {})
-
-#             # Stack-based test
-#             if 'stack' in expect:
-#                 expected_stack = [int(x, 16) for x in expect['stack']]
-#                 if stack != expected_stack or success != expect['success']:
-#                     print(f"❌ Test #{i + 1}/{total} {test['name']}")
-#                     if stack != expected_stack:
-#                         print("Stack doesn't match")
-#                         print(" expected:", expected_stack)
-#                         print("   actual:", stack)
-#                     else:
-#                         print("Success doesn't match")
-#                         print(" expected:", expect['success'])
-#                         print("   actual:", success)
-#                     print("\nTest code:")
-#                     print(test['code']['asm'])
-#                     print("Hint:", test['hint'])
-#                     print(f"Progress: {i}/{len(data)}")
-#                     break
-
-#             # Logs-based test
-#             elif 'logs' in expect:
-#                 expected_logs = expect['logs']
-#                 if stack != expected_logs or success != expect['success']:
-#                     print(f"❌ Test #{i + 1}/{total} {test['name']}")
-#                     if stack != expected_logs:
-#                         print("Logs don't match")
-#                         print(" expected:", expected_logs)
-#                         print("   actual:", stack)
-#                     else:
-#                         print("Success doesn't match")
-#                         print(" expected:", expect['success'])
-#                         print("   actual:", success)
-#                     print("\nTest code:")
-#                     print(test['code']['asm'])
-#                     print("Hint:", test['hint'])
-#                     print(f"Progress: {i}/{len(data)}")
-#                     break
-#             else:
-#                 print(f"✓  Test #{i + 1}/{total} {test['name']}")       
-
-# if __name__ == '__main__':
-#     test()
 
 def test():
     script_dirname = os.path.dirname(os.path.abspath(__file__))
@@ -787,28 +754,12 @@ def test():
         total = len(data)
 
         for i, test in enumerate(data):
-            # Determine which context to pass based on test index
-            if 101 > i > 96 or 111 < i < 116 or 116 < i < 119 or 131 < i < 137:
-                tx = test['tx']
-                code = bytes.fromhex(test['code']['bin'])
-                (success, result) = evm(code, tx, {})
-            elif 109 > i > 100:
-                tx = test['block']
-                code = bytes.fromhex(test['code']['bin'])
-                (success, result) = evm(code, tx, {})
-            elif i == 110 or 123 < i < 127:
-                tx = test['state']
-                code = bytes.fromhex(test['code']['bin'])
-                (success, result) = evm(code, tx, {})
-            elif i == 128:
-                sts = test['state']
-                tx = test['tx']
-                code = bytes.fromhex(test['code']['bin'])
-                (success, result) = evm(code, tx, sts)
-            else:
-                code = bytes.fromhex(test['code']['bin'])
-                (success, result) = evm(code, {}, {})
-
+            storage.clear()
+            sts = test.get('state') or {}
+            tx = test.get('tx') or test.get('block') or{}
+            code = bytes.fromhex(test['code']['bin'])
+            (success, result) = evm(code, tx, sts, tx.get('to'))
+            
             expect = test.get('expect', {})
 
             # Handle stack-based tests
