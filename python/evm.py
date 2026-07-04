@@ -743,6 +743,31 @@ def evm(code, tranx, sts, addr):
             else:
                 stack.insert(0,0)
 
+        if op == 0xf0:
+            value = stack.pop(0)
+            offset = stack.pop(0)
+            size = stack.pop(0)
+            
+            intial_code = memo[offset:offset+size]
+            
+            state[tx['to']] = {}
+            state[tx['to']]['balance'] = hex(value)
+            state[tx['to']]['code'] = {}
+            (suc, result) = evm(intial_code, tx or {}, {}, tx['to'])
+
+            if(suc):
+                state[tx['to']]['code']['bin'] = result
+                stack.insert(0,int(tx['to'], 16))
+            else:
+                stack.insert(0,0)
+
+        if op == 0xff:
+            adr = stack.pop(0)
+            
+            state[hex(adr)] = {}
+            state[hex(adr)]['balance'] = state[hex(addr)]['balance']
+            del state[hex(addr)]
+
 
     return (success, stack)
 
