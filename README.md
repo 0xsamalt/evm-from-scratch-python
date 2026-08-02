@@ -8,7 +8,9 @@ This is my personal implementation of the EVM specification, written entirely in
 
 ## Current Progress
 
-**137 out of 152 tests passing** ✓
+**152 out of 152 tests passing** ✓
+
+Every test in the [EVM From Scratch](https://github.com/w1nt3r-eth/evm-from-scratch) suite passes, which means the full opcode set is implemented, including stack manipulation, arithmetic, memory and storage, control flow, message calls, contract creation, and event logging.
 
 ### Implemented Features
 
@@ -59,9 +61,9 @@ This is my personal implementation of the EVM specification, written entirely in
 - `ADDRESS`, `CALLER`, `ORIGIN` - Account information
 - `BALANCE`, `SELFBALANCE` - Balance queries
 - `CALLVALUE` - ETH value sent
-- `GASPRICE`, `BASEFEE`, `GASLIMIT` - Gas information
+- `GAS`, `GASPRICE`, `BASEFEE`, `GASLIMIT` - Gas information
 - `COINBASE`, `TIMESTAMP`, `NUMBER` - Block information
-- `DIFFICULTY`, `CHAINID`, `BLOCKHASH` - Chain information
+- `DIFFICULTY`, `CHAINID`, `BLOCKHASH` - Chain information (BLOCKHASH returns 0, which the test suite permits)
 
 #### Call Data Operations
 
@@ -72,6 +74,18 @@ This is my personal implementation of the EVM specification, written entirely in
 - `CODESIZE`, `CODECOPY` - Contract code access
 - `EXTCODESIZE`, `EXTCODECOPY`, `EXTCODEHASH` - External code access
 
+#### Return Data Operations
+
+- `RETURNDATASIZE`, `RETURNDATACOPY` - Access return data from calls
+
+#### System Operations
+
+- `CREATE` - Deploy a new contract
+- `CALL`, `DELEGATECALL`, `STATICCALL` - Message calls
+- `RETURN` - Return data from execution
+- `REVERT` - Revert execution with data
+- `SELFDESTRUCT` - Destroy a contract and send its balance
+
 #### Logging
 
 - `LOG0` through `LOG4` - Event logging
@@ -79,10 +93,6 @@ This is my personal implementation of the EVM specification, written entirely in
 #### Cryptographic Operations
 
 - `SHA3` (KECCAK256) - Hashing
-
-#### In Progress
-
-- `RETURN` - Return data from execution
 
 ## Project Structure
 
@@ -97,6 +107,9 @@ evm-from-scratch/
 ## Running Tests
 
 ```bash
+# Install the required keccak hashing library
+pip install "eth-hash[pycryptodome]"
+
 # Run all tests
 cd python
 python evm.py
@@ -107,7 +120,7 @@ python evm.py
 ## Implementation Notes
 
 - **Language**: Pure Python 3
-- **Dependencies**: None (standard library only)
+- **Dependencies**: `eth-hash` for the KECCAK256 implementation (standard library otherwise)
 - **Architecture**: Single-file implementation for clarity
 - **Testing**: Uses the standardized test suite from evm.json
 
